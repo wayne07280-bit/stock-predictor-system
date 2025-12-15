@@ -131,7 +131,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
     data = pd.DataFrame() # 初始化一個空的 DataFrame
     
-    # *** 🛠️ 修正 (1)：台股雙重查詢嘗試 (.TW / .TWO) 🛠️ ***
+    # *** 🛠️ 數據獲取修正：台股雙重查詢嘗試 (.TW / .TWO) 🛠️ ***
     
     # 第一次嘗試：使用程式碼自動添加的代號
     try:
@@ -147,11 +147,11 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         try:
             data = yf.download(stock_ticker_two, start=start_date, end=end_date, progress=False)
             if not data.empty:
-                stock_ticker = stock_ticker_two # 更新股票代號，以供後續標題顯示正確
+                stock_ticker = stock_ticker_two # 更新股票代號
         except Exception:
             pass 
 
-    # *** 🛠️ 修正 (2)：處理 yfinance 可能返回的 MultiIndex 欄位名稱問題 🛠️ ***
+    # *** 🛠️ 數據獲取修正：處理 MultiIndex 欄位名稱問題 🛠️ ***
     if not data.empty and isinstance(data.columns, pd.MultiIndex):
         data.columns = [col[0] for col in data.columns]
     
@@ -159,11 +159,12 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         st.warning("⚠️ 查無此股票代號的歷史數據。請確認輸入是否正確。")
         return
 
-    # --- 數據準備 ---
+    # --- 數據準備與特徵工程 ---
+    
     # 1. 計算優化後的技術指標 
     data = calculate_technical_indicators(data.copy())
     
-    # 選擇用於訓練模型的特徵 (收盤價 + 所有的技術指標)
+    # 選擇用於訓練模型的特徵 
     all_possible_features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'KD_K', 'KD_D', 'BB_Ratio'] 
     
     # 篩選出 data 中實際存在的欄位作為最終特徵
@@ -188,50 +189,36 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
 
     # --- 模型訓練 ---
     with st.spinner("🤖 正在訓練 LSTM 模型..."):
-        # 傳遞 features_count 給建構函式
         model = build_and_train_lstm(X_train, y_train, features_count) 
     st.success("✅ 模型訓練完成！")
     
-    # --- 預測未來 (滾動預測) ---
+    # --- 預測未來 (滾動預測與漲跌幅限制) ---
     last_input = scaled_data[-TIME_STEP:] 
     future_predictions = []
     current_input = last_input
     
-    # 獲取預測起始日的前一天的真實收盤價 (用於計算漲跌幅限制)
     prev_close = data['Close'].iloc[-1] 
     
     for i in range(predict_days):
-        # 1. 模型預測下一個價格
         prediction = model.predict(current_input.reshape(1, TIME_STEP, features_count), verbose=0)
         
-        # 2. 反轉標準化以獲得真實價格
         prediction_scaled = np.zeros((1, features_count)) 
         prediction_scaled[0, 0] = prediction[0, 0]
         real_prediction = scaler.inverse_transform(prediction_scaled)[0, 0]
         
-        
-        # *** 🛠️ 關鍵修正 (3)：加入台股漲跌幅限制 (+/- 10%) 🛠️ ***
+        # *** 🛠️ 修正：台股漲跌幅限制 (+/- 10%) 🛠️ ***
         if market_type == "台股":
-            # 計算漲停價和跌停價
             limit_up = prev_close * 1.10
             limit_down = prev_close * 0.90
-            
-            # 使用 np.clip() 將預測價格約束在漲跌停範圍內
             constrained_prediction = np.clip(real_prediction, limit_down, limit_up)
-            
-            # 使用約束後的價格
             final_prediction = constrained_prediction
         else:
-            # 美股或其他市場，不設定漲跌幅限制
             final_prediction = real_prediction
         
         future_predictions.append(final_prediction)
         
-        # 3. 更新輸入數據：滾動預測的關鍵步驟 (使用約束後的價格反轉標準化)
-        
+        # 更新輸入數據
         new_feature_values = current_input[-1].copy() 
-        
-        # 將最終價格（已約束）反轉到標準化範圍，作為下一輪的輸入
         temp_scaled = np.zeros((1, features_count)) 
         temp_scaled[0, 0] = final_prediction 
         
@@ -241,10 +228,9 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         
         current_input = np.vstack([current_input[1:], new_feature_values])
         
-        # 更新用於下一次循環計算漲跌幅限制的收盤價
         prev_close = final_prediction 
     
-    # --- 繪圖與結果展示 ---
+    # --- 繪圖與結果展示 (包含布林通道和 KD 線) ---
     from plotly.subplots import make_subplots
     
     predict_dates = [data.index[-1] + timedelta(days=i) for i in range(1, predict_days + 1)]
@@ -272,20 +258,24 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         line=dict(color='orange', width=3)
     ), row=1, col=1)
     
-    # 繪製布林帶區間 (上軌、中軌、下軌)
-    if 'BB_Upper' in data.columns and 'BB_Lower' in data.columns:
+    # *** 🛠️ 關鍵修正 (4)：布林通道安全繪圖 🛠️ ***
+    bb_upper = data.get('BB_Upper')
+    bb_lower = data.get('BB_Lower')
+    bb_middle = data.get('BB_Middle') 
+    
+    if bb_upper is not None and bb_lower is not None:
         # 上軌
         fig.add_trace(go.Scatter(
-            x=data.index, y=data['BB_Upper'], line=dict(color='gray', width=1, dash='dash'), name='布林帶上軌'
+            x=data.index, y=bb_upper, line=dict(color='gray', width=1, dash='dash'), name='布林帶上軌'
         ), row=1, col=1)
         # 下軌
         fig.add_trace(go.Scatter(
-            x=data.index, y=data['BB_Lower'], line=dict(color='gray', width=1, dash='dash'), name='布林帶下軌'
+            x=data.index, y=bb_lower, line=dict(color='gray', width=1, dash='dash'), name='布林帶下軌'
         ), row=1, col=1)
         # 中軌
-        if 'BB_Middle' in data.columns:
+        if bb_middle is not None:
             fig.add_trace(go.Scatter(
-                x=data.index, y=data['BB_Middle'], line=dict(color='blue', width=1), name='布林帶中軌 (MA20)'
+                x=data.index, y=bb_middle, line=dict(color='blue', width=1), name='布林帶中軌 (MA20)'
             ), row=1, col=1)
             
     # --- 第二行：KD 線圖 (Stochastic Oscillator) ---
@@ -301,18 +291,14 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         
         # 繪製超買線 (80) 和超賣線 (20)
         fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
-        fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
-    
+        fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1) 
 
     # --- 佈局設置 ---
     fig.update_layout(height=700, 
                       showlegend=True,
                       xaxis_rangeslider_visible=False) 
     
-    # 清理 K 線圖中的多餘範圍選擇器
     fig.update_xaxes(rangeselector_visible=False, row=1, col=1)
-    
-    # 設定第二行 Y 軸範圍 (KD 線通常在 0-100)
     fig.update_yaxes(range=[0, 100], row=2, col=1)
     
     st.plotly_chart(fig, use_container_width=True) 
@@ -323,7 +309,6 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     latest_close = data['Close'].iloc[-1]
     avg_future_price = np.mean(future_predictions)
     
-    # 判斷預測走向：預測期內的價格變動百分比
     prediction_change_percent = (avg_future_price - latest_close) / latest_close * 100
     
     buy_advice = []
@@ -331,28 +316,22 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     latest = data.iloc[-1]
     
     # --- 買入訊號 ---
-    # 1. 強烈預測上漲 + RSI 不在超買區
     if prediction_change_percent >= 1.0 and 'RSI' in latest and latest['RSI'] < 70:
         buy_advice.append(f"📈 **LSTM 強力看漲 (+{prediction_change_percent:.2f}%)**: 預測未來股價有顯著上漲空間。")
 
-    # 2. MACD 金叉 (MACD_Signal > 0 且 MACD > MACD_Signal) + 預測走勢向上
     if 'MACD' in latest and 'MACD_Signal' in latest and latest['MACD_Signal'] > 0 and latest['MACD'] > latest['MACD_Signal'] and prediction_change_percent > 0:
         buy_advice.append("💰 **MACD 金叉訊號** (MACD 線上穿訊號線): 動能轉強，結合預測趨勢向上。")
     
-    # 3. 價格觸及布林帶下軌 (BB_Ratio 接近 0) + 預測反彈
-    if 'BB_Ratio' in latest and latest['BB_Ratio'] < 0.1 and prediction_change_percent > 0.1: # 需預測至少微幅反彈
+    if 'BB_Ratio' in latest and latest['BB_Ratio'] < 0.1 and prediction_change_percent > 0.1: 
         buy_advice.append("📉 **布林帶下軌支撐**: 價格進入布林帶超賣區，預測有反彈機會。")
 
     # --- 賣出訊號 ---
-    # 1. 強烈預測下跌 或 RSI 在極度超買區
     if prediction_change_percent <= -1.0 or ('RSI' in latest and latest['RSI'] > 75):
         sell_advice.append(f"📉 **LSTM 強力看跌 ({prediction_change_percent:.2f}%) / RSI 極度超買**: 預測下跌或 RSI 處於極度超買區。")
 
-    # 2. MACD 死叉 + 預測走勢向下
     if 'MACD' in latest and 'MACD_Signal' in latest and latest['MACD'] < latest['MACD_Signal'] and prediction_change_percent < 0:
         sell_advice.append("🛑 **MACD 死叉訊號**: 短期動能向下突破訊號線，結合預測趨勢向下。")
 
-    # 3. 價格觸及布林帶上軌 (BB_Ratio 接近 1)
     if 'BB_Ratio' in latest and latest['BB_Ratio'] > 0.9:
         sell_advice.append("⚠️ **布林帶上軌壓力**: 價格進入布林帶超買區，可能面臨回調壓力。")
     
