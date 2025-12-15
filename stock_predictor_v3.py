@@ -336,7 +336,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     st.plotly_chart(fig, use_container_width=True) 
     
     # --- 買賣點建議邏輯 ---
-    st.markdown("### 🎯 近期最佳買入點與賣出點建議 (結合 LSTM 預測趨勢)")
+    st.markdown("### 🎯 近期最佳買入點與賣出點建議")
     
     latest_close = data['Close'].iloc[-1]
     avg_future_price = np.mean(future_predictions)
