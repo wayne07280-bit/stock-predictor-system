@@ -6,3 +6,6 @@ scikit-learn
 tensorflow
 plotly
 pandas_ta
+# 鎖定 TensorFlow 和 Keras 到穩定版本
+tensorflow==2.15.0 
+keras==2.15.0
