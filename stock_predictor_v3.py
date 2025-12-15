@@ -208,8 +208,6 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
     features = [f for f in all_possible_features if f in data.columns]
     
-    st.info(f"💡 本次訓練使用的特徵：{', '.join(features)}")
-    
     data_for_model = data[features].values
     
     # 2. 數據標準化
@@ -223,21 +221,9 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     if len(X_train) < 100:
         st.error("❌ 歷史數據不足，無法訓練模型。請選擇有更多交易記錄的股票。")
         return
-        
-    # --- DEBUG 檢查點 (用於檢查布林通道欄位狀態) ---
-    st.markdown("---")
-    st.markdown("#### 🔍 數據診斷結果 (除錯用)")
-    if 'BB_Upper' in data.columns:
-        st.write(f"BB_Upper 欄位數量：{data['BB_Upper'].shape[0]}")
-        st.write(f"BB_Upper 欄位中 NaN 數量：{data['BB_Upper'].isnull().sum()}")
-        st.write(f"最後 5 個 BB_Upper 值：{data['BB_Upper'].tail().to_dict()}")
-    else:
-        st.error("BB_Upper 欄位在 DataFrame 中缺失！")
-    st.markdown("---")
-    # --- END DEBUG ---
 
     # --- 模型訓練 ---
-    with st.spinner("🤖 正在訓練 LSTM 模型..."):
+    with st.spinner("修但幾累喔..."):
         model = build_and_train_lstm(X_train, y_train, features_count) 
     st.success("✅ 模型訓練完成！")
     
@@ -396,7 +382,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
 
 # --- 5. Streamlit 介面佈局 ---
 st.set_page_config(page_title="股票預測系統", layout="wide")
-st.title("股票數據預測與買賣點建議系統 🚀")
+st.title("朴寶崴的股票預測系統(沒洨用版)")
 st.markdown("---")
 
 # 側邊欄輸入
