@@ -95,6 +95,12 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         # yfinance 獲取數據
         data = yf.download(stock_ticker, start=start_date, end=end_date)
         
+        # *** 🛠️ 關鍵修改：處理 MultiIndex 欄位名稱問題 🛠️ ***
+        if isinstance(data.columns, pd.MultiIndex):
+            # 如果是多重索引，則將其扁平化
+            # 僅保留數據名稱 (例如 'Close', 'Open')
+            data.columns = [col[0] for col in data.columns]
+    
     except Exception as e:
         st.error(f"⚠️ 獲取數據時發生錯誤。請檢查股票代號是否正確。錯誤訊息: {e}")
         return
