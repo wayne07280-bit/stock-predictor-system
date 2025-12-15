@@ -202,17 +202,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         st.error("❌ 歷史數據不足，無法訓練模型。請選擇有更多交易記錄的股票。")
         return
         
-    # --- DEBUG 檢查點 (用於檢查布林通道欄位狀態) ---
-    st.markdown("---")
-    st.markdown("#### 🔍 數據診斷結果 (除錯用)")
-    if 'BB_Upper' in data.columns:
-        st.write(f"BB_Upper 欄位數量：{data['BB_Upper'].shape[0]}")
-        st.write(f"BB_Upper 欄位中 NaN 數量：{data['BB_Upper'].isnull().sum()}")
-        st.write(f"最後 5 個 BB_Upper 值：{data['BB_Upper'].tail().to_dict()}")
-    else:
-        st.error("BB_Upper 欄位在 DataFrame 中缺失！")
-    st.markdown("---")
-    # --- END DEBUG ---
+    
 
     # --- 模型訓練 ---
     with st.spinner("🤖 正在訓練 LSTM 模型..."):
