@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import pandas_ta as ta # 技術分析函式庫
 
 # 設定：觀察過去 60 天的數據
-TIME_STEP = 60 
+TIME_STEP = 365 
 
 # --- 1. 輔助函式：數據預處理 ---
 def create_dataset(data, time_step=TIME_STEP):
@@ -145,7 +145,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         stock_ticker += ".TW"
         
     # 獲取歷史數據的日期範圍
-    start_date = date.today() - timedelta(days=3 * 365)
+    start_date = date.today() - timedelta(days=5 * 365)
     end_date = date.today() - timedelta(days=1)
     
     data = pd.DataFrame() # 初始化一個空的 DataFrame
