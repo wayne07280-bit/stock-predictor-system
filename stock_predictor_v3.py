@@ -374,7 +374,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
 
 # --- 5. Streamlit 介面佈局 ---
 st.set_page_config(page_title="股票預測系統", layout="wide")
-st.title("股票數據預測與買賣點建議系統 (部署版) 🚀")
+st.title("朴寶崴的垃圾預測系統")
 st.markdown("---")
 
 # 側邊欄輸入
