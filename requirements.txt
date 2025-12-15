@@ -5,8 +5,3 @@ yfinance
 scikit-learn
 plotly
 pandas-ta
-
-# 鎖定一個已被證實穩定的 TensorFlow/Keras 版本
-# (避免 Python 3.13 或新環境的兼容性問題)
-tensorflow==2.14.0 
-keras==2.14.0
