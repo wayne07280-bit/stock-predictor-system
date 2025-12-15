@@ -114,7 +114,6 @@ def calculate_technical_indicators(df):
     df.dropna(inplace=True) 
     return df
     
-# --- 4. 核心主程式邏輯 ---
 # 從 stock_predictor_v3.py 檔案中提取
 def run_prediction_system(stock_ticker, market_type, predict_days):
     # 設定參數
@@ -134,7 +133,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
     # *** 🛠️ 修正 (1)：台股雙重查詢嘗試 (.TW / .TWO) 🛠️ ***
     
-    # 第一次嘗試：使用程式碼自動添加的代號 (可能是 [代號].TW 或原始輸入)
+    # 第一次嘗試：使用程式碼自動添加的代號
     try:
         data = yf.download(stock_ticker, start=start_date, end=end_date, progress=False)
     except Exception:
@@ -142,9 +141,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
     # 如果第一次查詢失敗且是台股，則嘗試替換後綴為 .TWO
     if data.empty and market_type == "台股":
-        # 移除可能存在的 .TW 或 .TWO
         base_ticker = stock_ticker.replace('.TW', '').replace('.TWO', '')
-        # 嘗試使用 .TWO 後綴
         stock_ticker_two = f"{base_ticker}.TWO"
         st.info(f"第一次查詢失敗，嘗試替換為台股後綴: **{stock_ticker_two}**")
         try:
@@ -152,14 +149,12 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
             if not data.empty:
                 stock_ticker = stock_ticker_two # 更新股票代號，以供後續標題顯示正確
         except Exception:
-            pass # 第二次也失敗，則保持 data.empty
+            pass 
 
     # *** 🛠️ 修正 (2)：處理 yfinance 可能返回的 MultiIndex 欄位名稱問題 🛠️ ***
     if not data.empty and isinstance(data.columns, pd.MultiIndex):
-        # 如果是多重索引，則將其扁平化
         data.columns = [col[0] for col in data.columns]
     
-    # 最後，如果 data 仍然是空的，則報錯
     if data.empty:
         st.warning("⚠️ 查無此股票代號的歷史數據。請確認輸入是否正確。")
         return
@@ -307,6 +302,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         # 繪製超買線 (80) 和超賣線 (20)
         fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
         fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
+    
 
     # --- 佈局設置 ---
     fig.update_layout(height=700, 
