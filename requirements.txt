@@ -5,3 +5,10 @@ yfinance
 scikit-learn
 plotly
 pandas-ta
+
+# 升級到最新的 Keras (v3.x)
+# 確保與最新的 Python 環境兼容
+keras
+# Keras 3.x 需要指定後端，我們安裝 TensorFlow 後端
+keras-core
+tensorflow
