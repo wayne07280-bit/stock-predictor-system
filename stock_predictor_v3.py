@@ -186,8 +186,6 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
     features = [f for f in all_possible_features if f in data.columns]
     
-    st.info(f"💡 本次訓練使用的特徵：{', '.join(features)}")
-    
     data_for_model = data[features].values
     
     # 2. 數據標準化
@@ -205,7 +203,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
 
     # --- 模型訓練 ---
-    with st.spinner("🤖 正在訓練 LSTM 模型..."):
+    with st.spinner("掐但幾累喔..."):
         model = build_and_train_lstm(X_train, y_train, features_count) 
     st.success("✅ 模型訓練完成！")
     
