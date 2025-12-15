@@ -79,28 +79,49 @@ def calculate_technical_indicators(df):
     df.ta.stoch(append=True) 
     
     
-    # *** 🛠️ 關鍵：使用預設名稱，並進行安全重命名 🛠️ ***
+    # *** 🛠️ 關鍵修正：使用動態模糊匹配查找 pandas_ta 生成的欄位 🛠️ ***
     
-    # pandas_ta 預設生成的欄位名稱 (以週期20，標準差2.0和Stochastics 14,3,3 為例)
-    rename_dict = {
-        'SMA_20': 'MA_20', 
-        'SMA_50': 'MA_50',
-        'RSI_14': 'RSI',
-        'MACD_12_26_9': 'MACD',
-        'MACDs_12_26_9': 'MACD_Signal',
-        'BBL_20_2.0': 'BB_Lower',  # 布林下軌
-        'BBU_20_2.0': 'BB_Upper',  # 布林上軌
-        'BBM_20_2.0': 'BB_Middle', # 布林中軌
-        'STOCHk_14_3_3': 'KD_K', # K 線
-        'STOCHd_14_3_3': 'KD_D', # D 線
-    }
-
-    # 只重命名 DataFrame 中存在的欄位
-    final_rename_dict = {k: v for k, v in rename_dict.items() if k in df.columns}
-    df.rename(columns=final_rename_dict, inplace=True)
+    NEW_COL_MAP = {}
+    
+    # 遍歷 DataFrame 中所有的欄位
+    for col in df.columns:
+        col_upper = col.upper()
+        
+        # --- MA/RSI/MACD 匹配 (大部分版本是固定的) ---
+        if col_upper == 'SMA_20':
+            NEW_COL_MAP[col] = 'MA_20'
+        elif col_upper == 'SMA_50':
+            NEW_COL_MAP[col] = 'MA_50'
+        elif col_upper == 'RSI_14':
+            NEW_COL_MAP[col] = 'RSI'
+        elif col_upper.startswith('MACD_12_26'):
+            NEW_COL_MAP[col] = 'MACD'
+        elif col_upper.startswith('MACDS_12_26'):
+            NEW_COL_MAP[col] = 'MACD_Signal'
+        
+        # --- 布林帶和 KD 線模糊匹配 (確保 BB 欄位存在) ---
+        
+        # 布林帶 (BBL=Lower, BBM=Middle, BBU=Upper)
+        # 匹配任何以 BBL, BBM, BBU 開頭的欄位，忽略後續的週期和標準差數字
+        elif col_upper.startswith('BBL'):
+            NEW_COL_MAP[col] = 'BB_Lower'
+        elif col_upper.startswith('BBU'):
+            NEW_COL_MAP[col] = 'BB_Upper'
+        elif col_upper.startswith('BBM'):
+            NEW_COL_MAP[col] = 'BB_Middle'
+            
+        # KD 線 (STOCHK=K, STOCHD=D)
+        elif col_upper.startswith('STOCHK'):
+            NEW_COL_MAP[col] = 'KD_K'
+        elif col_upper.startswith('STOCHD'):
+            NEW_COL_MAP[col] = 'KD_D'
+            
+    # 執行重命名
+    df.rename(columns=NEW_COL_MAP, inplace=True)
     
     
     # 6. 安全計算 BB_Ratio (布林帶相對位置)
+    # 由於我們使用了模糊匹配，BB_Lower 和 BB_Upper 現在應該會存在
     if 'BB_Lower' in df.columns and 'BB_Upper' in df.columns:
         # 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
         df['BB_Ratio'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
