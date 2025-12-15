@@ -57,8 +57,8 @@ def calculate_technical_indicators(df):
     """計算 MACD, RSI 和 布林帶 (BBANDS) 等技術指標"""
     
     # 計算 移動平均線 (MA)
-    df.ta.sma(length=20, append=True) # MA_20
-    df.ta.sma(length=50, append=True) # MA_50
+    df.ta.sma(length=20, append=True)
+    df.ta.sma(length=50, append=True) 
     
     # 計算 RSI
     df.ta.rsi(length=14, append=True) 
@@ -67,19 +67,39 @@ def calculate_technical_indicators(df):
     df.ta.macd(append=True)
     
     # 計算 布林帶 (BBANDS)
-    df.ta.bbands(length=20, append=True)
+    # 使用 prefix='BB' 確保名稱一致性，並將結果儲存到一個新的 DataFrame
+    bbands_df = df.ta.bbands(length=20, append=False, prefix='BB')
     
-    # 將 pandas_ta 產生的欄位名稱簡化，以利後續處理
-    df.rename(columns={'SMA_20': 'MA_20', 'SMA_50': 'MA_50', 'RSI_14': 'RSI',
-                       'MACDh_12_26_9': 'MACD_Hist', 'MACD_12_26_9': 'MACD', 'MACDs_12_26_9': 'MACD_Signal',
-                       'BBL_20_2.0': 'BB_Lower', 'BBM_20_2.0': 'BB_Middle', 'BBU_20_2.0': 'BB_Upper'}, inplace=True)
+    # *** 🛠️ 關鍵修改：動態合併和重新命名 BBANDS 欄位 🛠️ ***
+    # 將生成的布林帶結果與主 DataFrame 合併
+    df = pd.concat([df, bbands_df], axis=1) 
     
-    # 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
+    # 根據慣例重新命名欄位，這樣後續的程式碼就不用動
+    # 我們需要從 df 中找到以 'BB_L' 和 'BB_U' 開頭的欄位名
+    
+    bb_lower_col = [col for col in df.columns if col.startswith('BB_L')][0]
+    bb_upper_col = [col for col in df.columns if col.startswith('BB_U')][0]
+    
+    df.rename(columns={
+        bb_lower_col: 'BB_Lower',
+        bb_upper_col: 'BB_Upper',
+        'RSI_14': 'RSI',
+        'SMA_20': 'MA_20', 
+        'SMA_50': 'MA_50',
+        'MACD_12_26_9': 'MACD',
+        'MACDs_12_26_9': 'MACD_Signal',
+        # 我們不需要 MACDh_12_26_9，因為它沒有用於特徵
+    }, inplace=True)
+    
+    # 5. 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
+    # 現在可以直接使用新的名稱
     df['BB_Ratio'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
 
     # 移除 NaN 值 (技術指標計算初期會產生 NaN)
     df.dropna(inplace=True) 
-    return df
+    return df # *** 注意：這裡的修改需要確保 run_prediction_system 函式接收的是更新後的 df ***
+
+# ... (在 run_prediction_system 裡，確保 data = calculate_technical_indicators(data.copy()) 被正確呼叫)
 
 # --- 4. 核心主程式邏輯 ---
 def run_prediction_system(stock_ticker, market_type, predict_days):
