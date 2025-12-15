@@ -102,7 +102,6 @@ def calculate_technical_indicators(df):
         # --- 布林帶和 KD 線模糊匹配 (確保 BB 欄位存在) ---
         
         # 布林帶 (BBL=Lower, BBM=Middle, BBU=Upper)
-        # 匹配任何以 BBL, BBM, BBU 開頭的欄位，忽略後續的週期和標準差數字
         elif col_upper.startswith('BBL'):
             NEW_COL_MAP[col] = 'BB_Lower'
         elif col_upper.startswith('BBU'):
@@ -121,7 +120,6 @@ def calculate_technical_indicators(df):
     
     
     # 6. 安全計算 BB_Ratio (布林帶相對位置)
-    # 由於我們使用了模糊匹配，BB_Lower 和 BB_Upper 現在應該會存在
     if 'BB_Lower' in df.columns and 'BB_Upper' in df.columns:
         # 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
         df['BB_Ratio'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
@@ -177,6 +175,30 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         st.warning("⚠️ 查無此股票代號的歷史數據。請確認輸入是否正確。")
         return
 
+    # --- 顯示最新價格資訊 ---
+    if 'Close' in data.columns:
+        latest_data = data.iloc[-1]
+        latest_close = latest_data['Close']
+        latest_date = data.index[-1].strftime('%Y/%m/%d')
+        
+        if len(data) >= 2:
+            previous_close = data.iloc[-2]['Close']
+            change = latest_close - previous_close
+            change_percent = (change / previous_close) * 100
+            
+            if change > 0: color = "green"; icon = "▲"
+            elif change < 0: color = "red"; icon = "▼"
+            else: color = "gray"; icon = "●"
+            
+            st.markdown(
+                f"### 最新價格：<span style='color:{color}'>{latest_close:,.2f} {icon}</span>",
+                unsafe_allow_html=True
+            )
+            st.markdown(f"**收盤日：** {latest_date} | **漲跌幅：** <span style='color:{color}'>{change:+.2f} ({change_percent:+.2f}%)</span>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"### 最新價格：{latest_close:,.2f}")
+            st.markdown(f"**收盤日：** {latest_date}")
+            
     # --- 數據準備與特徵工程 ---
     
     data = calculate_technical_indicators(data.copy())
@@ -185,6 +207,8 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     all_possible_features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'KD_K', 'KD_D', 'BB_Ratio'] 
     
     features = [f for f in all_possible_features if f in data.columns]
+    
+    st.info(f"💡 本次訓練使用的特徵：{', '.join(features)}")
     
     data_for_model = data[features].values
     
@@ -200,10 +224,20 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         st.error("❌ 歷史數據不足，無法訓練模型。請選擇有更多交易記錄的股票。")
         return
         
-    
+    # --- DEBUG 檢查點 (用於檢查布林通道欄位狀態) ---
+    st.markdown("---")
+    st.markdown("#### 🔍 數據診斷結果 (除錯用)")
+    if 'BB_Upper' in data.columns:
+        st.write(f"BB_Upper 欄位數量：{data['BB_Upper'].shape[0]}")
+        st.write(f"BB_Upper 欄位中 NaN 數量：{data['BB_Upper'].isnull().sum()}")
+        st.write(f"最後 5 個 BB_Upper 值：{data['BB_Upper'].tail().to_dict()}")
+    else:
+        st.error("BB_Upper 欄位在 DataFrame 中缺失！")
+    st.markdown("---")
+    # --- END DEBUG ---
 
     # --- 模型訓練 ---
-    with st.spinner("掐但幾累喔..."):
+    with st.spinner("🤖 正在訓練 LSTM 模型..."):
         model = build_and_train_lstm(X_train, y_train, features_count) 
     st.success("✅ 模型訓練完成！")
     
@@ -288,7 +322,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         if bb_middle is not None:
             fig.add_trace(go.Scatter(
                 x=data.index, y=bb_middle, line=dict(color='blue', width=1), name='布林帶中軌 (MA20)'
-            ), row=1, col=1) 
+            ), row=1, col=1)
             
     # --- 第二行：KD 線圖 (Stochastic Oscillator) ---
     if 'KD_K' in data.columns and 'KD_D' in data.columns:
@@ -303,7 +337,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         
         # 繪製超買線 (80) 和超賣線 (20)
         fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
-        fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1) 
+        fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
 
     # --- 佈局設置 ---
     fig.update_layout(height=700, 
@@ -362,7 +396,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
 
 # --- 5. Streamlit 介面佈局 ---
 st.set_page_config(page_title="股票預測系統", layout="wide")
-st.title("朴寶崴的股票預測系統 (沒洨用版)")
+st.title("股票數據預測與買賣點建議系統 🚀")
 st.markdown("---")
 
 # 側邊欄輸入
