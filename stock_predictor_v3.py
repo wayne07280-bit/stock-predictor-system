@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import pandas_ta as ta # 技術分析函式庫
 
 # 設定：觀察過去 60 天的數據
-TIME_STEP = 365 
+TIME_STEP = 100
 
 # --- 1. 輔助函式：數據預處理 ---
 def create_dataset(data, time_step=TIME_STEP):
