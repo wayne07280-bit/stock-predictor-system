@@ -145,7 +145,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         stock_ticker += ".TW"
         
     # 獲取歷史數據的日期範圍
-    start_date = date.today() - timedelta(days=5 * 365)
+    start_date = date.today() - timedelta(days=3 * 365)
     end_date = date.today() - timedelta(days=1)
     
     data = pd.DataFrame() # 初始化一個空的 DataFrame
