@@ -103,6 +103,9 @@ def calculate_technical_indicators(df):
 
 # --- 4. 核心主程式邏輯 ---
 def run_prediction_system(stock_ticker, market_type, predict_days):
+    # 設定參數
+    TIME_STEP = 60 # 觀察過去 60 天的數據
+
     st.subheader(f"📊 正在分析股票代號/名稱: **{stock_ticker}**")
 
     # 處理台股代碼
@@ -115,12 +118,11 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         # yfinance 獲取數據
         data = yf.download(stock_ticker, start=start_date, end=end_date)
         
-        # *** 🛠️ 關鍵修改：處理 MultiIndex 欄位名稱問題 🛠️ ***
+        # *** 🛠️ 關鍵修改 (1): 處理 yfinance 可能返回的 MultiIndex 欄位名稱問題 🛠️ ***
         if isinstance(data.columns, pd.MultiIndex):
             # 如果是多重索引，則將其扁平化
-            # 僅保留數據名稱 (例如 'Close', 'Open')
             data.columns = [col[0] for col in data.columns]
-    
+        
     except Exception as e:
         st.error(f"⚠️ 獲取數據時發生錯誤。請檢查股票代號是否正確。錯誤訊息: {e}")
         return
@@ -130,17 +132,26 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         return
 
     # --- 數據準備 ---
+    # 1. 計算優化後的技術指標 (此函式已包含命名修正和錯誤檢查)
     data = calculate_technical_indicators(data.copy())
     
     # 選擇用於訓練模型的特徵 (收盤價 + 所有的技術指標)
-    features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'BB_Ratio'] 
+    # 這裡的列表應包含所有可能的特徵名稱
+    all_possible_features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'BB_Ratio'] 
+    
+    # 篩選出 data 中實際存在的欄位作為最終特徵
+    features = [f for f in all_possible_features if f in data.columns]
+    
+    st.info(f"💡 本次訓練使用的特徵：{', '.join(features)}")
+    
+    # 使用篩選後的 features 列表
     data_for_model = data[features].values
     
-    # 數據標準化
+    # 2. 數據標準化
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data_for_model)
     
-    # 建立訓練集
+    # 3. 建立訓練集
     features_count = len(features)
     X_train, y_train = create_dataset(scaled_data)
     
@@ -150,15 +161,17 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
 
     # --- 模型訓練 ---
     with st.spinner("🤖 正在訓練 LSTM 模型... (這次訓練更久但更精準！)"):
+        # 傳遞 features_count 給建構函式
         model = build_and_train_lstm(X_train, y_train, features_count) 
     st.success("✅ 模型訓練完成！")
-
+    
     # --- 預測未來 (滾動預測) ---
     last_input = scaled_data[-TIME_STEP:] 
     future_predictions = []
     current_input = last_input
     
     for i in range(predict_days):
+        # 預測下一個價格
         prediction = model.predict(current_input.reshape(1, TIME_STEP, features_count), verbose=0)
         
         # 反轉標準化 (只針對 'Close' 價格，索引 0)
@@ -192,12 +205,13 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     ))
     
     # 加入布林帶
-    fig.add_trace(go.Scatter(x=data.index, y=data['BB_Upper'], line=dict(color='gray', width=1, dash='dash'), name='布林帶上軌'))
-    fig.add_trace(go.Scatter(x=data.index, y=data['BB_Lower'], line=dict(color='gray', width=1, dash='dash'), name='布林帶下軌'))
+    if 'BB_Upper' in data.columns and 'BB_Lower' in data.columns:
+        fig.add_trace(go.Scatter(x=data.index, y=data['BB_Upper'], line=dict(color='gray', width=1, dash='dash'), name='布林帶上軌'))
+        fig.add_trace(go.Scatter(x=data.index, y=data['BB_Lower'], line=dict(color='gray', width=1, dash='dash'), name='布林帶下軌'))
 
     fig.update_layout(title=f'{stock_ticker} 歷史股價與未來 {predict_days} 天預測',
                       xaxis_title='日期', yaxis_title='價格', xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True) 
     
     # --- 買賣點建議邏輯 ---
     st.markdown("### 🎯 近期最佳買入點與賣出點建議 (結合 LSTM 預測趨勢)")
@@ -214,28 +228,28 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
     # --- 買入訊號 ---
     # 1. 強烈預測上漲 + RSI 不在超買區
-    if prediction_change_percent >= 1.0 and latest['RSI'] < 70:
+    if prediction_change_percent >= 1.0 and 'RSI' in latest and latest['RSI'] < 70:
         buy_advice.append(f"📈 **LSTM 強力看漲 (+{prediction_change_percent:.2f}%)**: 預測未來股價有顯著上漲空間。")
 
     # 2. MACD 金叉 (MACD_Signal > 0 且 MACD > MACD_Signal) + 預測走勢向上
-    if latest['MACD_Signal'] > 0 and latest['MACD'] > latest['MACD_Signal'] and prediction_change_percent > 0:
+    if 'MACD' in latest and 'MACD_Signal' in latest and latest['MACD_Signal'] > 0 and latest['MACD'] > latest['MACD_Signal'] and prediction_change_percent > 0:
         buy_advice.append("💰 **MACD 金叉訊號** (MACD 線上穿訊號線): 動能轉強，結合預測趨勢向上。")
     
     # 3. 價格觸及布林帶下軌 (BB_Ratio 接近 0) + 預測反彈
-    if latest['BB_Ratio'] < 0.1 and prediction_change_percent > 0.1: # 需預測至少微幅反彈
+    if 'BB_Ratio' in latest and latest['BB_Ratio'] < 0.1 and prediction_change_percent > 0.1: # 需預測至少微幅反彈
         buy_advice.append("📉 **布林帶下軌支撐**: 價格進入布林帶超賣區，預測有反彈機會。")
 
     # --- 賣出訊號 ---
     # 1. 強烈預測下跌 或 RSI 在極度超買區
-    if prediction_change_percent <= -1.0 or latest['RSI'] > 75:
+    if prediction_change_percent <= -1.0 or ('RSI' in latest and latest['RSI'] > 75):
         sell_advice.append(f"📉 **LSTM 強力看跌 ({prediction_change_percent:.2f}%) / RSI 極度超買**: 預測下跌或 RSI 處於極度超買區。")
 
     # 2. MACD 死叉 + 預測走勢向下
-    if latest['MACD'] < latest['MACD_Signal'] and prediction_change_percent < 0:
+    if 'MACD' in latest and 'MACD_Signal' in latest and latest['MACD'] < latest['MACD_Signal'] and prediction_change_percent < 0:
         sell_advice.append("🛑 **MACD 死叉訊號**: 短期動能向下突破訊號線，結合預測趨勢向下。")
 
     # 3. 價格觸及布林帶上軌 (BB_Ratio 接近 1)
-    if latest['BB_Ratio'] > 0.9:
+    if 'BB_Ratio' in latest and latest['BB_Ratio'] > 0.9:
         sell_advice.append("⚠️ **布林帶上軌壓力**: 價格進入布林帶超買區，可能面臨回調壓力。")
     
     # 輸出建議
@@ -250,7 +264,6 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         st.markdown('\n'.join([f'* {advice}' for advice in sell_advice]))
     else:
         st.warning("🔴 **目前無明確賣出訊號**，建議持有。")
-
 
 # --- 5. Streamlit 介面佈局 ---
 st.set_page_config(page_title="股票預測系統", layout="wide")
