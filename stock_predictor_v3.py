@@ -125,7 +125,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         # yfinance 獲取數據
         data = yf.download(stock_ticker, start=start_date, end=end_date)
         
-        # *** 🛠️ 關鍵修改 (1): 處理 yfinance 可能返回的 MultiIndex 欄位名稱問題 🛠️ ***
+        # *** 🛠️ 修正 (1): 處理 yfinance 可能返回的 MultiIndex 欄位名稱問題 🛠️ ***
         if isinstance(data.columns, pd.MultiIndex):
             # 如果是多重索引，則將其扁平化
             data.columns = [col[0] for col in data.columns]
@@ -143,7 +143,6 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     data = calculate_technical_indicators(data.copy())
     
     # 選擇用於訓練模型的特徵 (收盤價 + 所有的技術指標)
-    # 這裡的列表應包含所有可能的特徵名稱
     all_possible_features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'BB_Ratio'] 
     
     # 篩選出 data 中實際存在的欄位作為最終特徵
@@ -177,21 +176,56 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     future_predictions = []
     current_input = last_input
     
+    # 獲取預測起始日的前一天的真實收盤價 (用於計算漲跌幅限制)
+    prev_close = data['Close'].iloc[-1] 
+    
     for i in range(predict_days):
-        # 預測下一個價格
+        # 1. 模型預測下一個價格 (仍是標準化後的)
         prediction = model.predict(current_input.reshape(1, TIME_STEP, features_count), verbose=0)
         
-        # 反轉標準化 (只針對 'Close' 價格，索引 0)
+        # 2. 反轉標準化以獲得真實價格
         prediction_scaled = np.zeros((1, features_count)) 
         prediction_scaled[0, 0] = prediction[0, 0]
         real_prediction = scaler.inverse_transform(prediction_scaled)[0, 0]
-        future_predictions.append(real_prediction)
         
-        # 更新輸入數據：用預測值替換掉第一天的數據
+        
+        # *** 🛠️ 關鍵修正 (2)：加入台股漲跌幅限制 (+/- 10%) 🛠️ ***
+        if market_type == "台股":
+            # 計算漲停價和跌停價
+            limit_up = prev_close * 1.10
+            limit_down = prev_close * 0.90
+            
+            # 使用 np.clip() 將預測價格約束在漲跌停範圍內
+            constrained_prediction = np.clip(real_prediction, limit_down, limit_up)
+            
+            # 使用約束後的價格
+            final_prediction = constrained_prediction
+        else:
+            # 美股或其他市場，不設定漲跌幅限制
+            final_prediction = real_prediction
+        
+        # 將最終預測結果儲存到列表
+        future_predictions.append(final_prediction)
+        
+        # 3. 更新輸入數據：滾動預測的關鍵步驟 (使用約束後的價格反轉標準化)
+        
         new_feature_values = current_input[-1].copy() 
-        new_feature_values[0] = prediction[0, 0] # 更新 'Close' 特徵
+        
+        # 將最終價格（已約束）反轉到標準化範圍，作為下一輪的輸入
+        temp_scaled = np.zeros((1, features_count)) 
+        temp_scaled[0, 0] = final_prediction # 設置為真實價格
+        
+        # 逆向轉換得到一個近似的標準化數值
+        # 注意：為了這個步驟能正確執行，需要在 run_prediction_system 頂部確保 features 是全局可用的
+        # 由於 scaler 已經 fit_transform 過整個數據集，這裡的 transform 是安全的
+        constrained_scaled_close = scaler.transform(temp_scaled)[0, 0] 
+        
+        new_feature_values[0] = constrained_scaled_close # 更新 'Close' 特徵 (索引 0)
         
         current_input = np.vstack([current_input[1:], new_feature_values])
+        
+        # 更新用於下一次循環計算漲跌幅限制的收盤價
+        prev_close = final_prediction 
     
     # --- 繪圖與結果展示 ---
     predict_dates = [data.index[-1] + timedelta(days=i) for i in range(1, predict_days + 1)]
@@ -215,6 +249,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     if 'BB_Upper' in data.columns and 'BB_Lower' in data.columns:
         fig.add_trace(go.Scatter(x=data.index, y=data['BB_Upper'], line=dict(color='gray', width=1, dash='dash'), name='布林帶上軌'))
         fig.add_trace(go.Scatter(x=data.index, y=data['BB_Lower'], line=dict(color='gray', width=1, dash='dash'), name='布林帶下軌'))
+    
 
     fig.update_layout(title=f'{stock_ticker} 歷史股價與未來 {predict_days} 天預測',
                       xaxis_title='日期', yaxis_title='價格', xaxis_rangeslider_visible=False)
