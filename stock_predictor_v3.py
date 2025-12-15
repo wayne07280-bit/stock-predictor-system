@@ -53,13 +53,15 @@ def build_and_train_lstm(X_train, y_train, features_count):
     return model
 
 # --- 3. 核心函式：計算技術指標 (使用 pandas_ta) ---
+# --- 3. 核心函式：計算技術指標 (使用 pandas_ta) ---
 def calculate_technical_indicators(df):
-    """計算 MACD, RSI 和 布林帶 (BBANDS) 等技術指標"""
+    """計算 MACD, RSI, 布林帶 (BBANDS) 和 KD 線 (Stochastics) 等技術指標"""
     
-    # 檢查數據是否足夠計算技術指標
-    if len(df) < 60: # 確保至少有 60 天數據來計算 50日MA和60天時間步
+    # 檢查數據是否足夠計算技術指標 (例如: 50日MA 需要 50天數據)
+    if len(df) < 60: 
         st.error("❌ 歷史數據不足，無法計算完整的技術指標。請選擇有更多交易記錄的股票。")
-        return pd.DataFrame({'Close': []}) # 返回空 DataFrame
+        # 返回一個帶有 'Close' 欄位的空 DataFrame，避免後續程式直接崩潰
+        return pd.DataFrame({'Close': []}) 
         
     # 1. 計算 移動平均線 (MA)
     df.ta.sma(length=20, append=True)
@@ -72,13 +74,15 @@ def calculate_technical_indicators(df):
     df.ta.macd(append=True)
     
     # 4. 計算 布林帶 (BBANDS)
-    # 確保欄位名稱使用預設，並直接添加到 df 中 (append=True)
     df.ta.bbands(length=20, append=True) 
     
+    # 5. 計算 KD 線 (Stochastics)
+    df.ta.stoch(append=True) 
     
-    # *** 🛠️ 關鍵修改：使用預設名稱，並進行安全重命名 🛠️ ***
-    # pandas_ta 預設生成的欄位名稱 (以週期20，標準差2.0為例)
-    # 我們將所有用到的欄位都納入重命名，即使它可能已經是我們想要的名稱
+    
+    # *** 🛠️ 關鍵：使用預設名稱，並進行安全重命名 🛠️ ***
+    
+    # pandas_ta 預設生成的欄位名稱 (以週期20，標準差2.0和Stochastics 14,3,3 為例)
     rename_dict = {
         'SMA_20': 'MA_20', 
         'SMA_50': 'MA_50',
@@ -88,6 +92,8 @@ def calculate_technical_indicators(df):
         'BBL_20_2.0': 'BB_Lower',  # 布林下軌
         'BBU_20_2.0': 'BB_Upper',  # 布林上軌
         'BBM_20_2.0': 'BB_Middle', # 布林中軌
+        'STOCHk_14_3_3': 'KD_K', # K 線
+        'STOCHd_14_3_3': 'KD_D', # D 線
     }
 
     # 只重命名 DataFrame 中存在的欄位
@@ -95,8 +101,8 @@ def calculate_technical_indicators(df):
     df.rename(columns=final_rename_dict, inplace=True)
     
     
-    # 5. 安全計算 BB_Ratio
-    # 確保 BB_Lower 和 BB_Upper 存在，才計算 BB_Ratio，否則賦予預設值
+    # 6. 安全計算 BB_Ratio (布林帶相對位置)
+    # 確保 BB_Lower 和 BB_Upper 存在，才計算 BB_Ratio
     if 'BB_Lower' in df.columns and 'BB_Upper' in df.columns:
         # 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
         df['BB_Ratio'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
@@ -109,41 +115,61 @@ def calculate_technical_indicators(df):
     return df
 
 # --- 4. 核心主程式邏輯 ---
+# 從 stock_predictor_v3.py 檔案中提取
 def run_prediction_system(stock_ticker, market_type, predict_days):
     # 設定參數
     TIME_STEP = 60 # 觀察過去 60 天的數據
 
     st.subheader(f"📊 正在分析股票代號/名稱: **{stock_ticker}**")
 
-    # 處理台股代碼
+    # 處理台股代碼 (預設加上 .TW)
     if market_type == "台股" and not stock_ticker.endswith(('.TW', '.TWO')):
         stock_ticker += ".TW"
         
+    # 獲取歷史數據的日期範圍
+    start_date = date.today() - timedelta(days=3 * 365)
+    end_date = date.today() - timedelta(days=1)
+    
+    data = pd.DataFrame() # 初始化一個空的 DataFrame
+    
+    # *** 🛠️ 修正 (1)：台股雙重查詢嘗試 (.TW / .TWO) 🛠️ ***
+    
+    # 第一次嘗試：使用程式碼自動添加的代號 (可能是 [代號].TW 或原始輸入)
     try:
-        start_date = date.today() - timedelta(days=3 * 365)
-        end_date = date.today() - timedelta(days=1)
-        # yfinance 獲取數據
-        data = yf.download(stock_ticker, start=start_date, end=end_date)
-        
-        # *** 🛠️ 修正 (1): 處理 yfinance 可能返回的 MultiIndex 欄位名稱問題 🛠️ ***
-        if isinstance(data.columns, pd.MultiIndex):
-            # 如果是多重索引，則將其扁平化
-            data.columns = [col[0] for col in data.columns]
-        
-    except Exception as e:
-        st.error(f"⚠️ 獲取數據時發生錯誤。請檢查股票代號是否正確。錯誤訊息: {e}")
-        return
+        data = yf.download(stock_ticker, start=start_date, end=end_date, progress=False)
+    except Exception:
+        pass 
+    
+    # 如果第一次查詢失敗且是台股，則嘗試替換後綴為 .TWO
+    if data.empty and market_type == "台股":
+        # 移除可能存在的 .TW 或 .TWO
+        base_ticker = stock_ticker.replace('.TW', '').replace('.TWO', '')
+        # 嘗試使用 .TWO 後綴
+        stock_ticker_two = f"{base_ticker}.TWO"
+        st.info(f"第一次查詢失敗，嘗試替換為台股後綴: **{stock_ticker_two}**")
+        try:
+            data = yf.download(stock_ticker_two, start=start_date, end=end_date, progress=False)
+            if not data.empty:
+                stock_ticker = stock_ticker_two # 更新股票代號，以供後續標題顯示正確
+        except Exception:
+            pass # 第二次也失敗，則保持 data.empty
 
+    # *** 🛠️ 修正 (2)：處理 yfinance 可能返回的 MultiIndex 欄位名稱問題 🛠️ ***
+    if not data.empty and isinstance(data.columns, pd.MultiIndex):
+        # 如果是多重索引，則將其扁平化
+        data.columns = [col[0] for col in data.columns]
+    
+    # 最後，如果 data 仍然是空的，則報錯
     if data.empty:
         st.warning("⚠️ 查無此股票代號的歷史數據。請確認輸入是否正確。")
         return
 
     # --- 數據準備 ---
-    # 1. 計算優化後的技術指標 (此函式已包含命名修正和錯誤檢查)
+    # 1. 計算優化後的技術指標 
     data = calculate_technical_indicators(data.copy())
     
     # 選擇用於訓練模型的特徵 (收盤價 + 所有的技術指標)
-    all_possible_features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'BB_Ratio'] 
+    all_possible_features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'KD_K', 'KD_D', 'BB_Ratio'] 
     
     # 篩選出 data 中實際存在的欄位作為最終特徵
     features = [f for f in all_possible_features if f in data.columns]
@@ -166,7 +192,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         return
 
     # --- 模型訓練 ---
-    with st.spinner("🤖 正在訓練 LSTM 模型... (這次訓練更久但更精準！)"):
+    with st.spinner("🤖 正在訓練 LSTM 模型..."):
         # 傳遞 features_count 給建構函式
         model = build_and_train_lstm(X_train, y_train, features_count) 
     st.success("✅ 模型訓練完成！")
@@ -180,7 +206,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     prev_close = data['Close'].iloc[-1] 
     
     for i in range(predict_days):
-        # 1. 模型預測下一個價格 (仍是標準化後的)
+        # 1. 模型預測下一個價格
         prediction = model.predict(current_input.reshape(1, TIME_STEP, features_count), verbose=0)
         
         # 2. 反轉標準化以獲得真實價格
@@ -189,7 +215,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         real_prediction = scaler.inverse_transform(prediction_scaled)[0, 0]
         
         
-        # *** 🛠️ 關鍵修正 (2)：加入台股漲跌幅限制 (+/- 10%) 🛠️ ***
+        # *** 🛠️ 關鍵修正 (3)：加入台股漲跌幅限制 (+/- 10%) 🛠️ ***
         if market_type == "台股":
             # 計算漲停價和跌停價
             limit_up = prev_close * 1.10
@@ -204,7 +230,6 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
             # 美股或其他市場，不設定漲跌幅限制
             final_prediction = real_prediction
         
-        # 將最終預測結果儲存到列表
         future_predictions.append(final_prediction)
         
         # 3. 更新輸入數據：滾動預測的關鍵步驟 (使用約束後的價格反轉標準化)
@@ -213,11 +238,8 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         
         # 將最終價格（已約束）反轉到標準化範圍，作為下一輪的輸入
         temp_scaled = np.zeros((1, features_count)) 
-        temp_scaled[0, 0] = final_prediction # 設置為真實價格
+        temp_scaled[0, 0] = final_prediction 
         
-        # 逆向轉換得到一個近似的標準化數值
-        # 注意：為了這個步驟能正確執行，需要在 run_prediction_system 頂部確保 features 是全局可用的
-        # 由於 scaler 已經 fit_transform 過整個數據集，這裡的 transform 是安全的
         constrained_scaled_close = scaler.transform(temp_scaled)[0, 0] 
         
         new_feature_values[0] = constrained_scaled_close # 更新 'Close' 特徵 (索引 0)
@@ -228,31 +250,75 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         prev_close = final_prediction 
     
     # --- 繪圖與結果展示 ---
-    predict_dates = [data.index[-1] + timedelta(days=i) for i in range(1, predict_days + 1)]
-    fig = go.Figure()
+    from plotly.subplots import make_subplots
     
-    # 歷史 K 線圖
+    predict_dates = [data.index[-1] + timedelta(days=i) for i in range(1, predict_days + 1)]
+    
+    # 設置兩行圖表：第一行高度佔 75%，第二行佔 25%
+    fig = make_subplots(rows=2, cols=1, 
+                        shared_xaxes=True, 
+                        vertical_spacing=0.05,
+                        row_heights=[0.75, 0.25], 
+                        subplot_titles=(f'{stock_ticker} 歷史股價、布林通道與預測', 'KD 線 (隨機指標)'))
+
+    # --- 第一行：K 線圖、布林通道和預測線 ---
+    
+    # 歷史 K 線圖 (Candlestick)
     fig.add_trace(go.Candlestick(
         x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name='歷史K線'
-    ))
+    ), row=1, col=1)
 
-    # 預測線
+    # 預測線 (Scatter)
     fig.add_trace(go.Scatter(
         x=data.index.tolist()[-TIME_STEP:] + predict_dates, 
         y=data['Close'].tolist()[-TIME_STEP:] + future_predictions,
         mode='lines+markers',
         name=f'預測股價 ({predict_days}天)',
         line=dict(color='orange', width=3)
-    ))
+    ), row=1, col=1)
     
-    # 加入布林帶
+    # 繪製布林帶區間 (上軌、中軌、下軌)
     if 'BB_Upper' in data.columns and 'BB_Lower' in data.columns:
-        fig.add_trace(go.Scatter(x=data.index, y=data['BB_Upper'], line=dict(color='gray', width=1, dash='dash'), name='布林帶上軌'))
-        fig.add_trace(go.Scatter(x=data.index, y=data['BB_Lower'], line=dict(color='gray', width=1, dash='dash'), name='布林帶下軌'))
-    
+        # 上軌
+        fig.add_trace(go.Scatter(
+            x=data.index, y=data['BB_Upper'], line=dict(color='gray', width=1, dash='dash'), name='布林帶上軌'
+        ), row=1, col=1)
+        # 下軌
+        fig.add_trace(go.Scatter(
+            x=data.index, y=data['BB_Lower'], line=dict(color='gray', width=1, dash='dash'), name='布林帶下軌'
+        ), row=1, col=1)
+        # 中軌
+        if 'BB_Middle' in data.columns:
+            fig.add_trace(go.Scatter(
+                x=data.index, y=data['BB_Middle'], line=dict(color='blue', width=1), name='布林帶中軌 (MA20)'
+            ), row=1, col=1)
+            
+    # --- 第二行：KD 線圖 (Stochastic Oscillator) ---
+    if 'KD_K' in data.columns and 'KD_D' in data.columns:
+        # K 線
+        fig.add_trace(go.Scatter(
+            x=data.index, y=data['KD_K'], line=dict(color='red', width=2), name='K 值'
+        ), row=2, col=1)
+        # D 線
+        fig.add_trace(go.Scatter(
+            x=data.index, y=data['KD_D'], line=dict(color='green', width=2), name='D 值'
+        ), row=2, col=1)
+        
+        # 繪製超買線 (80) 和超賣線 (20)
+        fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
+        fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
 
-    fig.update_layout(title=f'{stock_ticker} 歷史股價與未來 {predict_days} 天預測',
-                      xaxis_title='日期', yaxis_title='價格', xaxis_rangeslider_visible=False)
+    # --- 佈局設置 ---
+    fig.update_layout(height=700, 
+                      showlegend=True,
+                      xaxis_rangeslider_visible=False) 
+    
+    # 清理 K 線圖中的多餘範圍選擇器
+    fig.update_xaxes(rangeselector_visible=False, row=1, col=1)
+    
+    # 設定第二行 Y 軸範圍 (KD 線通常在 0-100)
+    fig.update_yaxes(range=[0, 100], row=2, col=1)
+    
     st.plotly_chart(fig, use_container_width=True) 
     
     # --- 買賣點建議邏輯 ---
