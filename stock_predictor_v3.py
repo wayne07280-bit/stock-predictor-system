@@ -52,8 +52,8 @@ def build_and_train_lstm(X_train, y_train, features_count):
     
     return model
 
-# --- 3. 核心函式：計算技術指標 (使用 pandas_ta) ---
-# --- 3. 核心函式：計算技術指標 (使用 pandas_ta) ---
+# File "/mount/src/stock-predictor-v3.py" (calculate_technical_indicators 函式)
+
 def calculate_technical_indicators(df):
     """計算 MACD, RSI, 布林帶 (BBANDS) 和 KD 線 (Stochastics) 等技術指標"""
     
@@ -113,7 +113,7 @@ def calculate_technical_indicators(df):
     # 移除 NaN 值 (技術指標計算初期會產生 NaN)
     df.dropna(inplace=True) 
     return df
-
+    
 # --- 4. 核心主程式邏輯 ---
 # 從 stock_predictor_v3.py 檔案中提取
 def run_prediction_system(stock_ticker, market_type, predict_days):
