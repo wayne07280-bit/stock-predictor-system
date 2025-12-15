@@ -7,8 +7,9 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots # 用於多圖表繪製
 from datetime import date, timedelta
-import pandas_ta as ta # 使用 pandas_ta 替代 talib，提高部署成功率
+import pandas_ta as ta # 技術分析函式庫
 
 # 設定：觀察過去 60 天的數據
 TIME_STEP = 60 
@@ -52,15 +53,13 @@ def build_and_train_lstm(X_train, y_train, features_count):
     
     return model
 
-# File "/mount/src/stock-predictor-v3.py" (calculate_technical_indicators 函式)
-
+# --- 3. 核心函式：計算技術指標 ---
 def calculate_technical_indicators(df):
     """計算 MACD, RSI, 布林帶 (BBANDS) 和 KD 線 (Stochastics) 等技術指標"""
     
     # 檢查數據是否足夠計算技術指標 (例如: 50日MA 需要 50天數據)
     if len(df) < 60: 
         st.error("❌ 歷史數據不足，無法計算完整的技術指標。請選擇有更多交易記錄的股票。")
-        # 返回一個帶有 'Close' 欄位的空 DataFrame，避免後續程式直接崩潰
         return pd.DataFrame({'Close': []}) 
         
     # 1. 計算 移動平均線 (MA)
@@ -102,19 +101,18 @@ def calculate_technical_indicators(df):
     
     
     # 6. 安全計算 BB_Ratio (布林帶相對位置)
-    # 確保 BB_Lower 和 BB_Upper 存在，才計算 BB_Ratio
     if 'BB_Lower' in df.columns and 'BB_Upper' in df.columns:
         # 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
         df['BB_Ratio'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
     else:
-        # 如果布林帶欄位缺失，則 BB_Ratio 設置為一個常數，確保模型輸入維度一致性
+        # 如果布林帶欄位缺失，則 BB_Ratio 設置為一個常數
         df['BB_Ratio'] = 0.5 
 
     # 移除 NaN 值 (技術指標計算初期會產生 NaN)
     df.dropna(inplace=True) 
     return df
     
-# 從 stock_predictor_v3.py 檔案中提取
+# --- 4. 核心主程式函式 ---
 def run_prediction_system(stock_ticker, market_type, predict_days):
     # 設定參數
     TIME_STEP = 60 # 觀察過去 60 天的數據
@@ -131,15 +129,14 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     
     data = pd.DataFrame() # 初始化一個空的 DataFrame
     
-    # *** 🛠️ 數據獲取修正：台股雙重查詢嘗試 (.TW / .TWO) 🛠️ ***
+    # *** 數據獲取修正：台股雙重查詢嘗試 (.TW / .TWO) ***
     
-    # 第一次嘗試：使用程式碼自動添加的代號
     try:
         data = yf.download(stock_ticker, start=start_date, end=end_date, progress=False)
     except Exception:
         pass 
     
-    # 如果第一次查詢失敗且是台股，則嘗試替換後綴為 .TWO
+    # 嘗試 .TWO 後綴
     if data.empty and market_type == "台股":
         base_ticker = stock_ticker.replace('.TW', '').replace('.TWO', '')
         stock_ticker_two = f"{base_ticker}.TWO"
@@ -151,7 +148,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         except Exception:
             pass 
 
-    # *** 🛠️ 數據獲取修正：處理 MultiIndex 欄位名稱問題 🛠️ ***
+    # *** 數據獲取修正：處理 MultiIndex 欄位名稱問題 ***
     if not data.empty and isinstance(data.columns, pd.MultiIndex):
         data.columns = [col[0] for col in data.columns]
     
@@ -161,18 +158,15 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
 
     # --- 數據準備與特徵工程 ---
     
-    # 1. 計算優化後的技術指標 
     data = calculate_technical_indicators(data.copy())
     
     # 選擇用於訓練模型的特徵 
     all_possible_features = ['Close', 'MA_20', 'MA_50', 'RSI', 'MACD', 'MACD_Signal', 'KD_K', 'KD_D', 'BB_Ratio'] 
     
-    # 篩選出 data 中實際存在的欄位作為最終特徵
     features = [f for f in all_possible_features if f in data.columns]
     
     st.info(f"💡 本次訓練使用的特徵：{', '.join(features)}")
     
-    # 使用篩選後的 features 列表
     data_for_model = data[features].values
     
     # 2. 數據標準化
@@ -186,6 +180,18 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     if len(X_train) < 100:
         st.error("❌ 歷史數據不足，無法訓練模型。請選擇有更多交易記錄的股票。")
         return
+        
+    # --- DEBUG 檢查點 (用於檢查布林通道欄位狀態) ---
+    st.markdown("---")
+    st.markdown("#### 🔍 數據診斷結果 (除錯用)")
+    if 'BB_Upper' in data.columns:
+        st.write(f"BB_Upper 欄位數量：{data['BB_Upper'].shape[0]}")
+        st.write(f"BB_Upper 欄位中 NaN 數量：{data['BB_Upper'].isnull().sum()}")
+        st.write(f"最後 5 個 BB_Upper 值：{data['BB_Upper'].tail().to_dict()}")
+    else:
+        st.error("BB_Upper 欄位在 DataFrame 中缺失！")
+    st.markdown("---")
+    # --- END DEBUG ---
 
     # --- 模型訓練 ---
     with st.spinner("🤖 正在訓練 LSTM 模型..."):
@@ -231,11 +237,8 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         prev_close = final_prediction 
     
     # --- 繪圖與結果展示 (包含布林通道和 KD 線) ---
-    from plotly.subplots import make_subplots
-    
     predict_dates = [data.index[-1] + timedelta(days=i) for i in range(1, predict_days + 1)]
     
-    # 設置兩行圖表：第一行高度佔 75%，第二行佔 25%
     fig = make_subplots(rows=2, cols=1, 
                         shared_xaxes=True, 
                         vertical_spacing=0.05,
@@ -258,7 +261,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         line=dict(color='orange', width=3)
     ), row=1, col=1)
     
-    # *** 🛠️ 關鍵修正 (4)：布林通道安全繪圖 🛠️ ***
+    # *** 🛠️ 關鍵修正：布林通道安全繪圖 🛠️ ***
     bb_upper = data.get('BB_Upper')
     bb_lower = data.get('BB_Lower')
     bb_middle = data.get('BB_Middle') 
@@ -276,7 +279,7 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         if bb_middle is not None:
             fig.add_trace(go.Scatter(
                 x=data.index, y=bb_middle, line=dict(color='blue', width=1), name='布林帶中軌 (MA20)'
-            ), row=1, col=1)
+            ), row=1, col=1) 
             
     # --- 第二行：KD 線圖 (Stochastic Oscillator) ---
     if 'KD_K' in data.columns and 'KD_D' in data.columns:
