@@ -56,50 +56,57 @@ def build_and_train_lstm(X_train, y_train, features_count):
 def calculate_technical_indicators(df):
     """計算 MACD, RSI 和 布林帶 (BBANDS) 等技術指標"""
     
-    # 計算 移動平均線 (MA)
+    # 檢查數據是否足夠計算技術指標
+    if len(df) < 60: # 確保至少有 60 天數據來計算 50日MA和60天時間步
+        st.error("❌ 歷史數據不足，無法計算完整的技術指標。請選擇有更多交易記錄的股票。")
+        return pd.DataFrame({'Close': []}) # 返回空 DataFrame
+        
+    # 1. 計算 移動平均線 (MA)
     df.ta.sma(length=20, append=True)
     df.ta.sma(length=50, append=True) 
     
-    # 計算 RSI
+    # 2. 計算 RSI
     df.ta.rsi(length=14, append=True) 
     
-    # 計算 MACD
+    # 3. 計算 MACD
     df.ta.macd(append=True)
     
-    # 計算 布林帶 (BBANDS)
-    # 使用 prefix='BB' 確保名稱一致性，並將結果儲存到一個新的 DataFrame
-    bbands_df = df.ta.bbands(length=20, append=False, prefix='BB')
+    # 4. 計算 布林帶 (BBANDS)
+    # 確保欄位名稱使用預設，並直接添加到 df 中 (append=True)
+    df.ta.bbands(length=20, append=True) 
     
-    # *** 🛠️ 關鍵修改：動態合併和重新命名 BBANDS 欄位 🛠️ ***
-    # 將生成的布林帶結果與主 DataFrame 合併
-    df = pd.concat([df, bbands_df], axis=1) 
     
-    # 根據慣例重新命名欄位，這樣後續的程式碼就不用動
-    # 我們需要從 df 中找到以 'BB_L' 和 'BB_U' 開頭的欄位名
-    
-    bb_lower_col = [col for col in df.columns if col.startswith('BB_L')][0]
-    bb_upper_col = [col for col in df.columns if col.startswith('BB_U')][0]
-    
-    df.rename(columns={
-        bb_lower_col: 'BB_Lower',
-        bb_upper_col: 'BB_Upper',
-        'RSI_14': 'RSI',
+    # *** 🛠️ 關鍵修改：使用預設名稱，並進行安全重命名 🛠️ ***
+    # pandas_ta 預設生成的欄位名稱 (以週期20，標準差2.0為例)
+    # 我們將所有用到的欄位都納入重命名，即使它可能已經是我們想要的名稱
+    rename_dict = {
         'SMA_20': 'MA_20', 
         'SMA_50': 'MA_50',
+        'RSI_14': 'RSI',
         'MACD_12_26_9': 'MACD',
         'MACDs_12_26_9': 'MACD_Signal',
-        # 我們不需要 MACDh_12_26_9，因為它沒有用於特徵
-    }, inplace=True)
+        'BBL_20_2.0': 'BB_Lower',  # 布林下軌
+        'BBU_20_2.0': 'BB_Upper',  # 布林上軌
+        'BBM_20_2.0': 'BB_Middle', # 布林中軌
+    }
+
+    # 只重命名 DataFrame 中存在的欄位
+    final_rename_dict = {k: v for k, v in rename_dict.items() if k in df.columns}
+    df.rename(columns=final_rename_dict, inplace=True)
     
-    # 5. 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
-    # 現在可以直接使用新的名稱
-    df['BB_Ratio'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
+    
+    # 5. 安全計算 BB_Ratio
+    # 確保 BB_Lower 和 BB_Upper 存在，才計算 BB_Ratio，否則賦予預設值
+    if 'BB_Lower' in df.columns and 'BB_Upper' in df.columns:
+        # 新增一個特徵：收盤價是否接近布林帶上下緣 (正規化至 0-1 區間)
+        df['BB_Ratio'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
+    else:
+        # 如果布林帶欄位缺失，則 BB_Ratio 設置為一個常數，確保模型輸入維度一致性
+        df['BB_Ratio'] = 0.5 
 
     # 移除 NaN 值 (技術指標計算初期會產生 NaN)
     df.dropna(inplace=True) 
-    return df # *** 注意：這裡的修改需要確保 run_prediction_system 函式接收的是更新後的 df ***
-
-# ... (在 run_prediction_system 裡，確保 data = calculate_technical_indicators(data.copy()) 被正確呼叫)
+    return df
 
 # --- 4. 核心主程式邏輯 ---
 def run_prediction_system(stock_ticker, market_type, predict_days):
