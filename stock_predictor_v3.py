@@ -3,9 +3,10 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.callbacks import EarlyStopping
+# 修正後的 Keras 3.0 導入：
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
+from keras.callbacks import EarlyStopping
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots # 用於多圖表繪製
 from datetime import date, timedelta
