@@ -53,6 +53,21 @@ def build_and_train_lstm(X_train, y_train, features_count):
     
     return model
 
+# --- 2.5 輔助函式：計算未來 N 個交易日 ---
+def get_next_n_business_days(start_date, n):
+    """
+    從給定日期之後，計算未來 n 個不包含週六和週日的日期 (即交易日)。
+    不考慮國定假日。
+    """
+    business_days = []
+    current_date = start_date
+    while len(business_days) < n:
+        current_date += timedelta(days=1)
+        # weekday()：0=週一, 6=週日。我們排除週六(5)和週日(6)。
+        if current_date.weekday() < 5: 
+            business_days.append(current_date)
+    return business_days
+
 # --- 3. 核心函式：計算技術指標 ---
 def calculate_technical_indicators(df):
     """計算 MACD, RSI, 布林帶 (BBANDS) 和 KD 線 (Stochastics) 等技術指標"""
@@ -213,6 +228,8 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     # 2. 數據標準化
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data_for_model)
+
+    
     
     # 3. 建立訓練集
     features_count = len(features)
@@ -233,6 +250,9 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
     current_input = last_input
     
     prev_close = data['Close'].iloc[-1] 
+
+    # *** 🛠️ 關鍵修正：生成未來 N 個交易日作為預測循環的迭代器 🛠️ ***
+    predict_dates_workdays = get_next_n_business_days(data.index[-1].to_pydatetime().date(), predict_days)
     
     for i in range(predict_days):
         prediction = model.predict(current_input.reshape(1, TIME_STEP, features_count), verbose=0)
@@ -281,12 +301,12 @@ def run_prediction_system(stock_ticker, market_type, predict_days):
         x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name='歷史K線'
     ), row=1, col=1)
 
-    # 預測線 (Scatter)
+    # 預測線 (Scatter) - 使用 predict_dates_workdays
     fig.add_trace(go.Scatter(
-        x=data.index.tolist()[-TIME_STEP:] + predict_dates, 
+        x=data.index.tolist()[-TIME_STEP:] + predict_dates_workdays, 
         y=data['Close'].tolist()[-TIME_STEP:] + future_predictions,
         mode='lines+markers',
-        name=f'預測股價 ({predict_days}天)',
+        name=f'預測股價 ({predict_days}個交易日)',
         line=dict(color='orange', width=3)
     ), row=1, col=1)
     
